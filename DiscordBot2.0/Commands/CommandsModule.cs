@@ -3,6 +3,7 @@ using DiscordBot2._0;
 using DSharpPlus.CommandsNext;
 using DSharpPlus.CommandsNext.Attributes;
 using DSharpPlus.Entities;
+using System;
 
 namespace MyFirstBot
 {
@@ -72,9 +73,11 @@ namespace MyFirstBot
 
         static int FindUserIndex(DiscordUser offendingMember)
         {
-            int index = Array.IndexOf(names, offendingMember.Username);
+            /*int index = Array.IndexOf(names, offendingMember.Username);
             if (index == -1) index = Array.IndexOf(iDs, offendingMember.Discriminator);
-            return index;
+            return index;*/
+
+            return Array.IndexOf(iDs, offendingMember.Id.ToString());
         }
 
         static void CreateUsers()
@@ -129,24 +132,22 @@ namespace MyFirstBot
         [Command("add"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task AddUser(CommandContext ctx, DiscordMember offendingMember)
         {
-            Spreadsheet.CreateUser(offendingMember.Username, offendingMember.Discriminator);
+            Spreadsheet.CreateUser(offendingMember.Username, offendingMember.Id.ToString());
             RefreshSpreadsheet();
             await ctx.RespondAsync("Utente aggiunto alla NaughtyList");
         }
 
         [Command("edit"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
-        public async Task EditUser(CommandContext ctx, string offendingMember, string newUsername, string newID)
+        public async Task EditUser(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = Array.IndexOf(names, offendingMember);
-            if (index == -1) index = Array.IndexOf(iDs, offendingMember);
+            int index = FindUserIndex(offendingMember);
             if (index == -1)
             {
                 await ctx.RespondAsync("Utente non trovato");
                 return;
             }
 
-            Spreadsheet.UpdateEntry("A", $"{index + 1}", newUsername);
-            Spreadsheet.UpdateEntry("B", $"{index + 1}", newID);
+            Spreadsheet.UpdateEntry("A", $"{index + 1}", offendingMember.Username);
             RefreshSpreadsheet();
             await ctx.RespondAsync("Username e/o ID modificati");
         }
@@ -155,7 +156,6 @@ namespace MyFirstBot
         public async Task DeleteUser(CommandContext ctx, string offendingMember)
         {
             int index = Array.IndexOf(names, offendingMember);
-            if (index == -1) index = Array.IndexOf(iDs, offendingMember);
             if (index == -1)
             {
                 await ctx.RespondAsync("Utente non trovato");
@@ -441,11 +441,13 @@ namespace MyFirstBot
                     user.RemoveExpiredOffences(moderatorName);
 
                     if (inGameWarn == null || disciplinaryOffence == null) FindRoles(ctx);
-                    DiscordMember searchedMember = membersList.FirstOrDefault(member => member.DisplayName == user.name);
-                    if (searchedMember == null) searchedMember = membersList.FirstOrDefault(member => member.Discriminator == user.iD);
-                    else if (searchedMember == null) continue;
-
+                    DiscordMember searchedMember = membersList.FirstOrDefault(member => member.Id.ToString() == user.iD);
+                    Console.WriteLine("Primo tentativo:" + searchedMember);
+                    if (searchedMember == null) searchedMember = membersList.FirstOrDefault(member => member.Username == user.name);
+                    if (searchedMember == null) continue;
+                    Console.WriteLine("Secondo tentativo:" + searchedMember);
                     await FixRoles(searchedMember, user);
+                    Console.WriteLine("Ruoli sistemati");
                 }
             }
 
@@ -495,13 +497,14 @@ namespace MyFirstBot
         [Command("sistemaRuoli"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task fixRoleCommand(CommandContext ctx)
         {
+            if (disciplinaryWarn == null) FindRoles(ctx);
             var membersList = await ctx.Guild.GetAllMembersAsync();
             int fixedRolesNumber = 0;
 
             foreach (User user in userList)
             {
-                DiscordMember searchedMember = membersList.FirstOrDefault(member => member.DisplayName == user.name);
-                if (searchedMember == null) searchedMember = membersList.FirstOrDefault(member => member.Discriminator == user.iD);
+                DiscordMember searchedMember = membersList.FirstOrDefault(member => member.Username == user.name);
+                if (searchedMember == null) searchedMember = membersList.FirstOrDefault(member => member.Id.ToString() == user.iD);
                 if (searchedMember == null) continue;
 
                 int[] userOffences = user.GetOffences();
@@ -543,5 +546,28 @@ namespace MyFirstBot
             await targetMember.RevokeRoleAsync(disciplinaryWarn);
             await targetMember.RevokeRoleAsync(disciplinaryWarn2);
         }
+
+        /*[Command("sistemaId"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
+        public async Task fixUserIDs(CommandContext ctx)
+        {
+            var membersList = await ctx.Guild.GetAllMembersAsync();
+            String modifiedUserNamesList = "";
+            int fixedIdsNumber = 0;
+
+            foreach (User user in userList)
+            {
+                DiscordMember searchedMember = membersList.FirstOrDefault(member => member.DisplayName == user.name);
+                if (searchedMember == null) searchedMember = membersList.FirstOrDefault(member => member.Discriminator == user.iD);
+                if (searchedMember == null) continue;
+
+                Spreadsheet.UpdateEntry("B", $"{user.userIndex}", searchedMember.Id.ToString());
+                modifiedUserNamesList += user.name + ", ";
+                fixedIdsNumber++;
+                //RefreshSpreadsheet();
+            }
+
+            if (fixedIdsNumber == 0) await ctx.RespondAsync("Non sono stati trovati utenti con ID da sistemare");
+            else await ctx.RespondAsync($"In totale sono stati sistemati gli ID di {fixedIdsNumber} utenti: " + modifiedUserNamesList);
+        }*/
     }
 }
