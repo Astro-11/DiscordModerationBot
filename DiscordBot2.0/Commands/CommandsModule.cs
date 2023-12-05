@@ -1,196 +1,126 @@
-﻿using DiscordBot;
-using DiscordBot2._0;
-using DSharpPlus.CommandsNext;
+﻿using DSharpPlus.CommandsNext;
 using DSharpPlus.CommandsNext.Attributes;
+using DSharpPlus.CommandsNext.Converters;
 using DSharpPlus.Entities;
+using Google.Apis.Util;
 using System;
+using System.Collections.Generic;
+using System.ComponentModel.Design;
+using System.Diagnostics.Metrics;
 
-namespace MyFirstBot
+namespace DiscordBot2._0
 {
-    public class MyFirstModule : BaseCommandModule
+    public class CommandModule : BaseCommandModule
     {
-        static List<User> userList;
-        static string[] names;
-        static string[] iDs;
-        static string[] textMutes;
-        static string[] voiceMutes;
-        static string[] inGameOffence;
-        static string[] disciplinaryOffence;
-        static string[] lastTextMuteRemovalDate;
-        static string[] lastVoiceMuteRemovalDate;
-        static string[] lastInGameOffenceRemovalDate;
-        static string[] lastDisciplinaryOffenceRemovalDate;
-        static DateTime[] lastOffenceDate;
+        private Database db = new SpreadsheetDatabase();
+        private List<User> dbUsersList = new List<User>();
+        static private DiscordRole textMute = null;
+        static private DiscordRole voiceMute = null;
+        static private Dictionary<int, DiscordRole> inGameWarnRoles = null;
+        static private Dictionary<int, DiscordRole> disciplinaryWarnRoles = null;
+        private bool rolesInitialized = false;
 
-        static DiscordRole disciplinaryWarn = null;
-        static DiscordRole disciplinaryWarn2 = null;
-        static DiscordRole inGameWarn = null;
-        static DiscordRole inGameWarn2 = null;
-        static DiscordRole inGameWarn3 = null;
-        static DiscordRole textMute = null;
-        static DiscordRole voiceMute = null;
-
-        public static void RefreshSpreadsheet()
+        private void FindRoles(CommandContext ctx)
         {
-            names = Spreadsheet.ReadEntry("A", "A");
-            iDs = Spreadsheet.ReadEntry("B", "B");
-            textMutes = Spreadsheet.ReadEntry("C", "C");
-            voiceMutes = Spreadsheet.ReadEntry("D", "D");
-            inGameOffence = Spreadsheet.ReadEntry("E", "E");
-            disciplinaryOffence = Spreadsheet.ReadEntry("F", "F");
-            lastTextMuteRemovalDate = Spreadsheet.ReadEntry("I", "I");
-            lastVoiceMuteRemovalDate = Spreadsheet.ReadEntry("J", "J");
-            lastInGameOffenceRemovalDate = Spreadsheet.ReadEntry("K", "K");
-            lastDisciplinaryOffenceRemovalDate = Spreadsheet.ReadEntry("L", "L");
-            List<DateTime> dateList = new List<DateTime>();
-
-            foreach (string dateString in Spreadsheet.ReadEntry("G", "G"))
-            {
-                if (dateString != "Data ultima punizione" && dateString != "00/00/00" && dateString != "/")
-                {
-                    dateList.Add(DateTime.ParseExact(dateString, "dd/MM/yyyy", null));
-                }
-                else
-                {
-                    dateList.Add(DateTime.Parse("01/01/2001"));
-                }
-            }
-
-            lastOffenceDate = dateList.ToArray();
-            CreateUsers();
-        }
-
-        static void FindRoles(CommandContext ctx)
-        {
-            disciplinaryWarn = ctx.Guild.GetRole(828573087728795679);
-            disciplinaryWarn2 = ctx.Guild.GetRole(828573116389261312);
-            inGameWarn = ctx.Guild.GetRole(596612543598952460);
-            inGameWarn2 = ctx.Guild.GetRole(828573042426380299);
-            inGameWarn3 = ctx.Guild.GetRole(905845233739235471);
+            rolesInitialized = true;
             textMute = ctx.Guild.GetRole(698653530625540178);
             voiceMute = ctx.Guild.GetRole(672109597884022794);
+
+            DiscordRole disciplinaryWarn = ctx.Guild.GetRole(828573087728795679);
+            DiscordRole disciplinaryWarn2 = ctx.Guild.GetRole(828573116389261312);
+            DiscordRole inGameWarn = ctx.Guild.GetRole(596612543598952460);
+            DiscordRole inGameWarn2 = ctx.Guild.GetRole(828573042426380299);
+            DiscordRole inGameWarn3 = ctx.Guild.GetRole(905845233739235471);
+
+            inGameWarnRoles = new Dictionary<int, DiscordRole>() { { 0, null }, { 1, inGameWarn }, { 2, inGameWarn2 }, {3, inGameWarn3 }, { 4, null } };
+            disciplinaryWarnRoles = new Dictionary<int, DiscordRole>() { { 0, null }, { 1, disciplinaryWarn }, { 2, disciplinaryWarn2 }, { 3, null } };
         }
 
-        static int FindUserIndex(DiscordUser offendingMember)
+        private User FindDiscordUserInDatabase(DiscordUser discordUser)
         {
-            /*int index = Array.IndexOf(names, offendingMember.Username);
-            if (index == -1) index = Array.IndexOf(iDs, offendingMember.Discriminator);
-            return index;*/
-
-            return Array.IndexOf(iDs, offendingMember.Id.ToString());
+            Console.WriteLine("ID: " + discordUser.Id);
+            return db.getUser(discordUser.Id);
         }
 
-        static void CreateUsers()
+        private List<User> GetAllUsers(CommandContext ctx)
         {
-            userList = new List<User>();
-
-            foreach (string username in names)
-            {
-                int index = Array.IndexOf(names, username);
-                User newUser = new User();
-                newUser.name = names[index];
-                newUser.iD = iDs[index];
-                newUser.textMute = toNumber(textMutes[index]);
-                newUser.voiceMute = toNumber(voiceMutes[index]);
-                newUser.inGameOffence = toNumber(inGameOffence[index]);
-                newUser.disciplinaryOffence = toNumber(disciplinaryOffence[index]);
-                newUser.lastTextMuteRemovalDate = lastTextMuteRemovalDate[index];
-                newUser.lastVoiceMuteRemovalDate = lastVoiceMuteRemovalDate[index];
-                newUser.lastInGameOffenceRemovalDate = lastInGameOffenceRemovalDate[index];
-                newUser.lastDisciplinaryOffenceRemovalDate = lastDisciplinaryOffenceRemovalDate[index];
-                newUser.lastOffenceDate = lastOffenceDate[index];
-                newUser.userIndex = index + 1;
-                userList.Add(newUser);
-            }
-
-            int toNumber(string offence)
-            {
-                int n = 0;
-                foreach (char c in offence) if (c == 'X') n++;
-                return n;
-            }
+            if (dbUsersList.Count == 0) dbUsersList = new List<User>(db.getUsers().Where(user => ctx.Guild.Members.ContainsKey((ulong)user.id)));
+            return dbUsersList;
         }
+
 
         [Command("status"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task StatusCommand(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
+            Console.WriteLine("Comando chiamato");
+            User user = FindDiscordUserInDatabase(offendingMember);
+            Console.WriteLine("Utente trovato: " + user.name);
 
-            await ctx.RespondAsync("Nome: " + userList[index].name +
-                                   "\nID: " + userList[index].iD +
-                                   "\nMute testuali: " + userList[index].textMute +
-                                   "\nMute vocali: " + userList[index].voiceMute +
-                                   "\nInfrazioni in-game: " + userList[index].inGameOffence +
-                                   "\nInfrazioni disciplinari: " + userList[index].disciplinaryOffence);
+            await ctx.RespondAsync("Nome: " + user.name +
+                                   "\nID: " + user.id +
+                                   "\nMute testuali: " + user.offencesRecord.textMute.getOffenceLevel() +
+                                   "\nMute vocali: " + user.offencesRecord.voiceMute.getOffenceLevel() +
+                                   "\nInfrazioni in-game: " + user.offencesRecord.inGameOffence.getOffenceLevel() +
+                                   "\nInfrazioni disciplinari: " + user.offencesRecord.disciplinaryOffence.getOffenceLevel());
         }
 
         [Command("add"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task AddUser(CommandContext ctx, DiscordMember offendingMember)
         {
-            Spreadsheet.CreateUser(offendingMember.Username, offendingMember.Id.ToString());
-            RefreshSpreadsheet();
+            db.addUser(offendingMember.Username, offendingMember.Id);
             await ctx.RespondAsync("Utente aggiunto alla NaughtyList");
         }
 
         [Command("edit"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task EditUser(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
-            Spreadsheet.UpdateEntry("A", $"{index + 1}", offendingMember.Username);
-            RefreshSpreadsheet();
-            await ctx.RespondAsync("Username e/o ID modificati");
+            User user = FindDiscordUserInDatabase(offendingMember);
+            user.name = offendingMember.Username;
+            db.refreshUser(user);
+            await ctx.RespondAsync("Username modificato");
         }
 
         [Command("delete"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
-        public async Task DeleteUser(CommandContext ctx, string offendingMember)
+        public async Task DeleteUser(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = Array.IndexOf(names, offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
-            Spreadsheet.DeleteEntry($"A{index + 1}", $"L{index + 1}");
-            RefreshSpreadsheet();
+            User user = FindDiscordUserInDatabase(offendingMember);
+            db.deleteUser(user);
             await ctx.RespondAsync("Utente rimosso dalla NaughtyList");
         }
 
         [Command("disciplinare"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task AddDisciplinaryOffence(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
+            User user = FindDiscordUserInDatabase(offendingMember);
             string moderatorName = ctx.Member.Username;
-            if (userList[index].AddOffence("disciplinaryOffence", moderatorName) == false)
+
+            try
+            {
+                user.offencesRecord.disciplinaryOffence.increaseOffence();
+            }
+            catch (OffenceLevelOverTheCapException)
             {
                 await ctx.RespondAsync("L'utente ha raggiunto il numero massimo di warn");
                 return;
             }
 
-            if (disciplinaryWarn == null) FindRoles(ctx);
-            if (offendingMember.Roles.Any(x => x == disciplinaryWarn))
+            db.commitUserOffencesChanges(user, user.offencesRecord.disciplinaryOffence, moderatorName);
+
+            try
             {
-                await offendingMember.GrantRoleAsync(disciplinaryWarn2);
-                await offendingMember.RevokeRoleAsync(disciplinaryWarn);
+                if (!rolesInitialized) FindRoles(ctx);
+                if (user.offencesRecord.inGameOffence.getOffenceLevel() > 1)
+                {
+                    DiscordRole oldWarnRole = offendingMember.Roles.First(role => disciplinaryWarnRoles.ContainsValue(role));
+                    await offendingMember.RevokeRoleAsync(oldWarnRole);
+                }
+                await offendingMember.GrantRoleAsync(disciplinaryWarnRoles[user.offencesRecord.disciplinaryOffence.getOffenceLevel()]);
             }
-            else await offendingMember.GrantRoleAsync(disciplinaryWarn);
+            catch (Exception)
+            {
+                await ctx.RespondAsync("Errore nell'assegnamento dei ruoli");
+                return;
+            }
 
             await ctx.RespondAsync("Warn disciplinare aggiunto");
         }
@@ -198,64 +128,72 @@ namespace MyFirstBot
         [Command("ingame"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task AddInGameOffenceOffence(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
+            User user = FindDiscordUserInDatabase(offendingMember);
             string moderatorName = ctx.Member.Username;
-            if (userList[index].AddOffence("inGameOffence", moderatorName) == false)
+
+            try
+            {
+                user.offencesRecord.inGameOffence.increaseOffence();
+            }
+            catch (OffenceLevelOverTheCapException)
             {
                 await ctx.RespondAsync("L'utente ha raggiunto il numero massimo di warn");
                 return;
             }
 
-            if (inGameWarn == null) FindRoles(ctx);
-            if (offendingMember.Roles.Any(x => x == inGameWarn))
+            db.commitUserOffencesChanges(user, user.offencesRecord.inGameOffence, moderatorName);
+
+            try
             {
-                await offendingMember.GrantRoleAsync(inGameWarn2);
-                await offendingMember.RevokeRoleAsync(inGameWarn);
-                await ctx.RespondAsync("Warn in-game aggiunto, l'utente deve ricevere un gameban di due settimane");
+                if (!rolesInitialized) FindRoles(ctx);
+                if (user.offencesRecord.inGameOffence.getOffenceLevel() > 1)
+                {
+                    DiscordRole oldWarnRole = offendingMember.Roles.First(role => inGameWarnRoles.ContainsValue(role));
+                    await offendingMember.RevokeRoleAsync(oldWarnRole);
+                }
+                await offendingMember.GrantRoleAsync(inGameWarnRoles[user.offencesRecord.inGameOffence.getOffenceLevel()]);
             }
-            else if (offendingMember.Roles.Any(x => x == inGameWarn2))
+            catch (Exception)
             {
-                await offendingMember.GrantRoleAsync(inGameWarn3);
-                await offendingMember.RevokeRoleAsync(inGameWarn2);
-                await ctx.RespondAsync("Warn in-game aggiunto, l'utente deve ricevere un gameban di due mesi");
+                await ctx.RespondAsync("Errore nell'assegnamento dei ruoli");
+                return;
             }
-            else if (offendingMember.Roles.Any(x => x == inGameWarn3))
+
+            string answer = "Warn in-game aggiunto";
+            switch (user.offencesRecord.inGameOffence.getOffenceLevel())
             {
-                await ctx.RespondAsync("L'utente ha raggiunto il numero di warn in-game e deve ricevere un gameban permanente");
+                case 2:
+                    answer += ", l'utente deve ricevere un gameban di due settimane";
+                    break;
+                case 3:
+                    answer += ", l'utente deve ricevere un gameban di due mesi";
+                    break;
+                case 4:
+                    answer += ", l'utente deve ricevere un gameban permanente";
+                    break;
             }
-            else
-            {
-                await offendingMember.GrantRoleAsync(inGameWarn);
-                await ctx.RespondAsync("Warn in-game aggiunto");
-            }
+            await ctx.RespondAsync(answer);
         }
 
         [Command("testuale"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task AddTextMuteOffence(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
+            User user = FindDiscordUserInDatabase(offendingMember);
             string moderatorName = ctx.Member.Username;
-            if (userList[index].AddOffence("textMute", moderatorName) == false)
+
+            try
             {
-                await ctx.RespondAsync("L'utente ha raggiunto il numero massimo di warn");
+                user.offencesRecord.textMute.increaseOffence();
+            }
+            catch (OffenceLevelOverTheCapException)
+            {
+                await ctx.RespondAsync("L'utente ha raggiunto il numero massimo di mute testuali");
                 return;
             }
 
-            if (textMute == null) FindRoles(ctx);
+            db.commitUserOffencesChanges(user, user.offencesRecord.textMute, moderatorName);
 
-            switch (userList[index].textMute)
+            switch (user.offencesRecord.textMute.getOffenceLevel())
             {
                 case 1:
                     await ctx.RespondAsync("Mute testuale aggiunto, l'utente deve essere mutato per 1 giorno");
@@ -275,29 +213,29 @@ namespace MyFirstBot
         [Command("vocale"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task AddVoiceMuteOffence(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
+            User user = FindDiscordUserInDatabase(offendingMember);
             string moderatorName = ctx.Member.Username;
-            if (userList[index].AddOffence("voiceMute", moderatorName) == false)
+
+            try
             {
-                await ctx.RespondAsync("L'utente ha raggiunto il numero massimo di warn");
+                user.offencesRecord.voiceMute.increaseOffence();
+            }
+            catch (OffenceLevelOverTheCapException)
+            {
+                await ctx.RespondAsync("L'utente ha raggiunto il numero massimo di mute vocali");
                 return;
             }
 
-            if (voiceMute == null) FindRoles(ctx);
+            db.commitUserOffencesChanges(user, user.offencesRecord.voiceMute, moderatorName);
 
-            switch (userList[index].voiceMute)
+            switch (user.offencesRecord.voiceMute.getOffenceLevel())
             {
                 case 1:
                     await ctx.RespondAsync("Mute vocale aggiunto, l'utente deve essere mutato per 1 giorno");
                     break;
                 case 2:
-                    userList[index].AddOffence("disciplinaryOffence", moderatorName);
+                    user.offencesRecord.disciplinaryOffence.increaseOffence();
+                    db.commitUserOffencesChanges(user, user.offencesRecord.disciplinaryOffence, moderatorName);
                     await ctx.RespondAsync("Mute vocale aggiunto, l'utente deve essere mutato per una settimana. All'utente è stato inoltre aggiunto un warn disciplinare");
                     break;
                 case 3:
@@ -309,146 +247,145 @@ namespace MyFirstBot
         [Command("remove"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task RemoveOffence(CommandContext ctx, DiscordMember offendingMember, string offence)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
+            User user = FindDiscordUserInDatabase(offendingMember);
+            OffenceInterface offenceToDecrease = null;
             string moderatorName = ctx.Member.Username;
-            if (userList[index].RemoveOffence(offence, moderatorName) == false)
-            {
-                await ctx.RespondAsync("L'utente non ha infrazioni da rimuovere");
-                return;
-            }
+            Dictionary<int, DiscordRole> warnRolesDictionaryToUse = null;
+            if (rolesInitialized == false) FindRoles(ctx);
 
             switch (offence)
             {
                 case "testuale":
-                    if (textMute == null) FindRoles(ctx);
-                    //Filler
+                    offenceToDecrease = user.offencesRecord.textMute;
                     break;
                 case "vocale":
-                    if (voiceMute == null) FindRoles(ctx);
-                    //Filler
+                    offenceToDecrease = user.offencesRecord.voiceMute;
                     break;
                 case "ingame":
-                    if (inGameWarn == null) FindRoles(ctx);
-                    if (offendingMember.Roles.Any(x => x == inGameWarn2))
-                    {
-                        await offendingMember.RevokeRoleAsync(inGameWarn2);
-                        await offendingMember.GrantRoleAsync(inGameWarn);
-                    }
-                    else if (offendingMember.Roles.Any(x => x == inGameWarn3))
-                    {
-                        await offendingMember.RevokeRoleAsync(inGameWarn3);
-                        await offendingMember.GrantRoleAsync(inGameWarn2);
-                    }
-                    else
-                    await offendingMember.RevokeRoleAsync(inGameWarn);
+                    offenceToDecrease = user.offencesRecord.inGameOffence;
+                    warnRolesDictionaryToUse = inGameWarnRoles;
                     break;
                 case "disciplinare":
-                    if (disciplinaryWarn == null) FindRoles(ctx);
-                    if (offendingMember.Roles.Any(x => x == disciplinaryWarn))
-                    {
-                        await offendingMember.RevokeRoleAsync(disciplinaryWarn2);
-                        await offendingMember.GrantRoleAsync(disciplinaryWarn);
-                    }
-                    else await offendingMember.RevokeRoleAsync(disciplinaryWarn);
+                    offenceToDecrease = user.offencesRecord.disciplinaryOffence;
+                    warnRolesDictionaryToUse = disciplinaryWarnRoles;
                     break;
                 default:
                     await ctx.RespondAsync("Tipo di infrazione non valido");
                     return;
             }
 
-            await ctx.RespondAsync($"{offence} rimosso");
+            try
+            {
+                offenceToDecrease.decreaseOffence();
+            }
+            catch (OffenceLevelZeroException)
+            {
+                await ctx.RespondAsync("L'utente non ha infrazioni da rimuovere");
+                return;
+            }
+
+            db.commitUserOffencesChanges(user, moderatorName);
+
+            if (offenceToDecrease == user.offencesRecord.disciplinaryOffence || offenceToDecrease == user.offencesRecord.inGameOffence)
+            {
+                try
+                {
+                    if (!rolesInitialized) FindRoles(ctx);
+                    DiscordRole oldWarnRole = offendingMember.Roles.First(role => warnRolesDictionaryToUse.ContainsValue(role));
+                    await offendingMember.RevokeRoleAsync(oldWarnRole);
+                    if (offenceToDecrease.getOffenceLevel() != 0) await offendingMember.GrantRoleAsync(warnRolesDictionaryToUse[offenceToDecrease.getOffenceLevel()]);
+                }
+                catch (Exception)
+                {
+                    await ctx.RespondAsync("Errore nell'assegnamento dei ruoli");
+                    return;
+                }
+            }
+
+            await ctx.RespondAsync($"{offenceToDecrease.getOffenceName()} rimosso");
         }
 
         [Command("scaduti"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task checkExpiredOffences(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
+            User user = FindDiscordUserInDatabase(offendingMember);
+            Console.WriteLine("User found: " + user.name);
+            Dictionary<OffenceInterface, int> numberOfDecayedLevels = user.offencesRecord.getOffencesNumberOfDecayedLevels();
+            Console.WriteLine("2");
 
-            int[] expiredOffences = userList[index].CheckExpiredOffences();
-            if (expiredOffences.All(o => o == 0)) await ctx.RespondAsync($"{userList[index].name}#{userList[index].iD} non ha infrazioni scadute");
-            else await ctx.RespondAsync($"Infrazioni scadute per {userList[index].name}#{userList[index].iD}: {expiredOffences[0]} mute testuali, {expiredOffences[1]} mute vocali, {expiredOffences[2]} warn in-game, {expiredOffences[3]} warn disciplinari");
+            if (numberOfDecayedLevels.All(o => o.Value == 0)) await ctx.RespondAsync($"{user.name}#{user.id} non ha infrazioni scadute");
+            else await ctx.RespondAsync($"Infrazioni scadute per {user.name}#{user.id}: " +
+                $"{numberOfDecayedLevels[user.offencesRecord.textMute]} mute testuali, " +
+                $"{numberOfDecayedLevels[user.offencesRecord.voiceMute]} mute vocali, " +
+                $"{numberOfDecayedLevels[user.offencesRecord.inGameOffence]} warn in-game, " +
+                $"{numberOfDecayedLevels[user.offencesRecord.disciplinaryOffence]} warn disciplinari");
         }
 
         [Command("scaduti"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task checkExpiredOffences(CommandContext ctx)
         {
-            string str = "Infrazioni scadute per utente:\n";
+            string str = "Infrazioni scadute per utente:";
 
-            foreach (User user in userList)
+            foreach (User user in GetAllUsers(ctx))
             {
-                if (user.name == "Nome" || user.name == "Naughty boy") continue;
-                int[] expiredOffences = user.CheckExpiredOffences();
-                if (!expiredOffences.All(o => o == 0)) str += ($"{user.name}#{user.iD}: {expiredOffences[0]} mute testuali, {expiredOffences[1]} mute vocali, {expiredOffences[2]} warn in-game, {expiredOffences[3]} warn disciplinari\n");
+                Dictionary<OffenceInterface, int> numberOfDecayedLevels = user.offencesRecord.getOffencesNumberOfDecayedLevels();
+
+                if (!numberOfDecayedLevels.All(o => o.Value == 0))
+                    str += $"\n{user.name}#{user.id}: " +
+                           $"{numberOfDecayedLevels[user.offencesRecord.textMute]} mute testuali, " +
+                           $"{numberOfDecayedLevels[user.offencesRecord.voiceMute]} mute vocali, " +
+                           $"{numberOfDecayedLevels[user.offencesRecord.inGameOffence]} warn in-game, " +
+                           $"{numberOfDecayedLevels[user.offencesRecord.disciplinaryOffence]} warn disciplinari";
             }
 
-            if (str == "Infrazioni scadute per utente:\n") str = "Non ci sono utenti con infrazioni scadute";
+            if (str == "Infrazioni scadute per utente:") str = "Non ci sono utenti con infrazioni scadute";
             await ctx.RespondAsync(str);
         }
 
         [Command("rimuoviScaduti"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task removeExpiredOffences(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
-
+            User user = FindDiscordUserInDatabase(offendingMember);
+            Dictionary<OffenceInterface, int> numberOfDecayedLevels = user.offencesRecord.getOffencesNumberOfDecayedLevels();
             string moderatorName = ctx.Member.Username;
-            int[] expiredOffences = userList[index].CheckExpiredOffences();
 
-            if (expiredOffences.All(o => o == 0))
+            if (numberOfDecayedLevels.All(o => o.Value == 0))
             {
-                await ctx.RespondAsync($"{userList[index].name}#{userList[index].iD} non ha infrazioni scadute");
+                await ctx.RespondAsync($"{user.name}#{user.id} non ha infrazioni scadute");
                 return;
             }
 
-            await ctx.RespondAsync($"Sono stati rimossi {expiredOffences[0]} mute testuali, {expiredOffences[1]} mute vocali, {expiredOffences[2]} warn in-game, {expiredOffences[3]} warn disciplinari per {userList[index].name}#{userList[index].iD}");
-            userList[index].RemoveExpiredOffences(moderatorName);
+            user.offencesRecord.removeExpiredOffences();
+            db.commitUserOffencesChanges(user, moderatorName);
 
-            if (inGameWarn == null || disciplinaryOffence == null) FindRoles(ctx);
-            await FixRoles(offendingMember, userList[index]);
+            await ctx.RespondAsync($"Sono stati rimossi " +
+                $"{numberOfDecayedLevels[user.offencesRecord.textMute]} mute testuali, " +
+                $"{numberOfDecayedLevels[user.offencesRecord.voiceMute]} mute vocali, " +
+                $"{numberOfDecayedLevels[user.offencesRecord.inGameOffence]} warn in-game, " +
+                $"{numberOfDecayedLevels[user.offencesRecord.disciplinaryOffence]} warn disciplinari " +
+                $"per {user.name}#{user.id}");
+
+            if (rolesInitialized == false) FindRoles(ctx);
+            await FixRoles(offendingMember, user);
         }
 
         [Command("rimuoviScaduti"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task removeExpiredOffences(CommandContext ctx)
         {
             string moderatorName = ctx.Member.Username;
-            var membersList = await ctx.Guild.GetAllMembersAsync();
             int[] totalNumberOfRemovedOffences = new int[4];
 
-            foreach (User user in userList)
+            foreach (User user in GetAllUsers(ctx))
             {
-                if (user.name == "Nome" || user.name == "Naughty boy") continue;
-                int[] expiredOffences = user.CheckExpiredOffences();
+                Dictionary<OffenceInterface, int> numberOfDecayedLevels = user.offencesRecord.getOffencesNumberOfDecayedLevels();
+                if (numberOfDecayedLevels.All(o => o.Value == 0)) continue;
 
-                if (expiredOffences.All(o => o == 0)) continue;
-                else
-                {
-                    totalNumberOfRemovedOffences = Enumerable.Zip(totalNumberOfRemovedOffences, expiredOffences, (x, y) => x + y).ToArray();
-                    user.RemoveExpiredOffences(moderatorName);
+                totalNumberOfRemovedOffences = Enumerable.Zip(totalNumberOfRemovedOffences, numberOfDecayedLevels.Values, (x, y) => x + y).ToArray();
+                user.offencesRecord.removeExpiredOffences();
+                db.commitUserOffencesChanges(user, moderatorName);
 
-                    if (inGameWarn == null || disciplinaryOffence == null) FindRoles(ctx);
-                    DiscordMember searchedMember = membersList.FirstOrDefault(member => member.Id.ToString() == user.iD);
-                    Console.WriteLine("Primo tentativo:" + searchedMember);
-                    if (searchedMember == null) searchedMember = membersList.FirstOrDefault(member => member.Username == user.name);
-                    if (searchedMember == null) continue;
-                    Console.WriteLine("Secondo tentativo:" + searchedMember);
-                    await FixRoles(searchedMember, user);
-                    Console.WriteLine("Ruoli sistemati");
-                }
+                if (rolesInitialized == false) FindRoles(ctx);
+                await FixRoles(ctx.Guild.Members[(ulong)user.id], user);
             }
 
             await ctx.RespondAsync($"In totale sono stati rimossi: {totalNumberOfRemovedOffences[0]} mute testuali, {totalNumberOfRemovedOffences[1]} mute vocali, {totalNumberOfRemovedOffences[2]} warn in-game, {totalNumberOfRemovedOffences[3]} warn disciplinari");
@@ -457,68 +394,45 @@ namespace MyFirstBot
         [Command("sistemaRuoli"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task fixRolesCommand(CommandContext ctx, DiscordMember offendingMember)
         {
-            int index = FindUserIndex(offendingMember);
-            if (index == -1)
-            {
-                await ctx.RespondAsync("Utente non trovato");
-                return;
-            }
+            User user = FindDiscordUserInDatabase(offendingMember);
+            Console.WriteLine("Utente trovato");
+            if (rolesInitialized == false) FindRoles(ctx);
+            Console.WriteLine("Ruoli inizializzati");
 
-            var membersList = await ctx.Guild.GetAllMembersAsync();
-            int fixedRolesNumber = 0;
-
-            DiscordMember searchedMember = membersList.FirstOrDefault(member => member == offendingMember);
-            if (searchedMember == null)
-            {
-                await ctx.RespondAsync("Utente non trovato nella NaughtyList");
-                return;
-            }
-
-            int[] userOffences = userList[index].GetOffences();
-            if (inGameWarn == null || disciplinaryOffence == null) FindRoles(ctx);
-            await removeWarnRoles(searchedMember);
-
-            if (userOffences[2] == 0 && userOffences[3] == 0)
+            if (!CheckForUnwantedRoles(offendingMember, user))
             {
                 await ctx.RespondAsync("L'utente non ha ruoli da sistemare");
+                return;
             }
             else
             {
-                if (userOffences[2] == 1) await searchedMember.GrantRoleAsync(inGameWarn);
-                if (userOffences[2] == 2) await searchedMember.GrantRoleAsync(inGameWarn2);
-                if (userOffences[2] == 3) await searchedMember.GrantRoleAsync(inGameWarn3);
-                if (userOffences[3] == 1) await searchedMember.GrantRoleAsync(disciplinaryWarn);
-                if (userOffences[3] == 2) await searchedMember.GrantRoleAsync(disciplinaryWarn2);
+                Console.WriteLine("Ruoli da sistemare trovati");
+                await FixRoles(ctx.Guild.Members[(ulong)user.id], user);
+                Console.WriteLine("Ruoli sistemati");
+                await ctx.RespondAsync("Ruoli sistemati");
             }
-
-            await ctx.RespondAsync("Ruoli sistemati");
         }
 
         [Command("sistemaRuoli"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task fixRoleCommand(CommandContext ctx)
         {
-            if (disciplinaryWarn == null) FindRoles(ctx);
+            Console.WriteLine("Comando chiamato");
+            if (rolesInitialized == false) FindRoles(ctx);
             var membersList = await ctx.Guild.GetAllMembersAsync();
+            Console.WriteLine("Membri trovati");
             int fixedRolesNumber = 0;
 
-            foreach (User user in userList)
+            foreach (User user in GetAllUsers(ctx))
             {
-                DiscordMember searchedMember = membersList.FirstOrDefault(member => member.Username == user.name);
-                if (searchedMember == null) searchedMember = membersList.FirstOrDefault(member => member.Id.ToString() == user.iD);
-                if (searchedMember == null) continue;
-
-                int[] userOffences = user.GetOffences();
-                await removeWarnRoles(searchedMember);
-
-                if (userOffences[2] == 0 && userOffences[3] == 0) continue;
+                DiscordMember offendingMember = ctx.Guild.Members[(ulong)user.id];
+                Console.WriteLine("Membro singolo trovato: " + offendingMember.DisplayName + " " + user.name);
+                if (!CheckForUnwantedRoles(offendingMember, user)) continue;
                 else
                 {
+                    Console.WriteLine("Richiesta sistemazione ruoli per membro singolo");
+                    await FixRoles(offendingMember, user);
+                    Console.WriteLine("Ruoli sistemati per membro singolo");
                     fixedRolesNumber++;
-                    if (userOffences[2] == 1) await searchedMember.GrantRoleAsync(inGameWarn);
-                    if (userOffences[2] == 2) await searchedMember.GrantRoleAsync(inGameWarn2);
-                    if (userOffences[2] == 3) await searchedMember.GrantRoleAsync(inGameWarn3);
-                    if (userOffences[3] == 1) await searchedMember.GrantRoleAsync(disciplinaryWarn);
-                    if (userOffences[3] == 2) await searchedMember.GrantRoleAsync(disciplinaryWarn2);
                 }
             }
 
@@ -528,24 +442,47 @@ namespace MyFirstBot
 
         public async Task FixRoles(DiscordMember targetMember, User targetUser)
         {
-            int[] userOffences = targetUser.GetOffences();
-            await removeWarnRoles(targetMember);
+            if (!CheckForUnwantedRoles(targetMember, targetUser)) return;
 
-            if (userOffences[2] == 1) await targetMember.GrantRoleAsync(inGameWarn);
-            if (userOffences[2] == 2) await targetMember.GrantRoleAsync(inGameWarn2);
-            if (userOffences[2] == 3) await targetMember.GrantRoleAsync(inGameWarn3);
-            if (userOffences[3] == 1) await targetMember.GrantRoleAsync(disciplinaryWarn);
-            if (userOffences[3] == 2) await targetMember.GrantRoleAsync(disciplinaryWarn2);
+            List<DiscordRole> expectedRoles = new List<DiscordRole>() { inGameWarnRoles[targetUser.offencesRecord.inGameOffence.getOffenceLevel()], disciplinaryWarnRoles[targetUser.offencesRecord.disciplinaryOffence.getOffenceLevel()] };
+            expectedRoles.RemoveAll(role => role == null);
+            List<DiscordRole> targetMemberWarnRoles = targetMember.Roles.Where(role => inGameWarnRoles.ContainsValue(role) || disciplinaryWarnRoles.ContainsValue(role)).ToList();
+            Console.WriteLine("Expected roles: ");
+            expectedRoles.ForEach(o => Console.WriteLine(o));
+            Console.WriteLine("Target member warn roles: ");
+            targetMemberWarnRoles.ForEach(o => Console.WriteLine(o));
+            foreach (DiscordRole unwatedRole in targetMemberWarnRoles.Except(expectedRoles)) { await targetMember.RevokeRoleAsync(unwatedRole); }
+            Console.WriteLine("2");
+            foreach (DiscordRole wantedRole in expectedRoles.Except(targetMemberWarnRoles)) { await targetMember.GrantRoleAsync(wantedRole); }
+            Console.WriteLine("3");
+
+            //targetMemberWarnRoles.Where(role => !expectedRoles.Contains(role)).ToList().ForEach(async unwantedRole => await targetMember.RevokeRoleAsync(unwantedRole));
+            //expectedRoles.Where(expectedRole => !targetMemberWarnRoles.Contains(expectedRole)).ToList().ForEach(async wantedRole => await targetMember.GrantRoleAsync(wantedRole));
         }
 
-        public async Task removeWarnRoles(DiscordMember targetMember)
+        public bool CheckForUnwantedRoles(DiscordMember targetMember, User targetUser)
         {
-            await targetMember.RevokeRoleAsync(inGameWarn);
-            await targetMember.RevokeRoleAsync(inGameWarn2);
-            await targetMember.RevokeRoleAsync(inGameWarn2);
-            await targetMember.RevokeRoleAsync(disciplinaryWarn);
-            await targetMember.RevokeRoleAsync(disciplinaryWarn2);
+            //Console.WriteLine(targetUser.offencesRecord.inGameOffence.getOffenceLevel());
+            //Console.WriteLine(inGameWarnRoles[targetUser.offencesRecord.inGameOffence.getOffenceLevel()]);
+            //Console.WriteLine(disciplinaryWarnRoles[targetUser.offencesRecord.disciplinaryOffence.getOffenceLevel()]);
+            List<DiscordRole> expectedRoles = new List<DiscordRole>() { inGameWarnRoles[targetUser.offencesRecord.inGameOffence.getOffenceLevel()], disciplinaryWarnRoles[targetUser.offencesRecord.disciplinaryOffence.getOffenceLevel()] };
+            expectedRoles.RemoveAll(role => role == null);
+            //Console.WriteLine("2");
+            List<DiscordRole> targetMemberWarnRoles = targetMember.Roles.Where(role => inGameWarnRoles.ContainsValue(role) || disciplinaryWarnRoles.ContainsValue(role)).ToList();
+            //Console.WriteLine("3");
+
+            //Console.WriteLine(expectedRoles.All(targetMemberWarnRoles.Contains));
+            //Console.WriteLine(targetMemberWarnRoles.Count == expectedRoles.Count);
+
+            return !(expectedRoles.All(targetMemberWarnRoles.Contains) && targetMemberWarnRoles.Count == expectedRoles.Count);
         }
+
+        /*public async Task removeWarnRoles(DiscordMember targetMember)
+        {
+
+            targetMember.Roles.Where(role => inGameWarnRoles.ContainsValue(role) || disciplinaryWarnRoles.ContainsValue(role)).ToList().ForEach(async role => await targetMember.RevokeRoleAsync(role));
+            await Task.Delay(100);
+        }*/
 
         /*[Command("sistemaId"), RequirePermissionsAttribute(DSharpPlus.Permissions.MuteMembers)]
         public async Task fixUserIDs(CommandContext ctx)

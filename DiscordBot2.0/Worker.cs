@@ -1,6 +1,5 @@
 using DSharpPlus;
 using DSharpPlus.CommandsNext;
-using MyFirstBot;
 
 namespace DiscordBot2._0
 {
@@ -18,14 +17,13 @@ namespace DiscordBot2._0
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
             Spreadsheet.GoogleSheet();
-            MyFirstModule.RefreshSpreadsheet();
 
             var commands = discordClient.UseCommandsNext(new CommandsNextConfiguration()
             {
                 StringPrefixes = new[] { "!" }
             });
 
-            commands.RegisterCommands<MyFirstModule>();
+            commands.RegisterCommands<CommandModule>();
 
             await discordClient.ConnectAsync();
             Console.WriteLine("Connected");

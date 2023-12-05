@@ -28,7 +28,7 @@ namespace DiscordBot2._0
             });
         }
 
-        public static string[] ReadEntry(string _startingCell, string _endingCell)
+        public static List<string> ReadEntry(string _startingCell, string _endingCell)
         {
             var range = $"{sheet}!{_startingCell}:{_endingCell}";
             var request = service.Spreadsheets.Values.Get(SpreadSheetID, range);
@@ -48,7 +48,7 @@ namespace DiscordBot2._0
                     }
                 }
 
-                return cellsList.ToArray();
+                return cellsList.ToList();
             }
             else
             {
